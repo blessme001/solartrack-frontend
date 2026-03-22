@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>SolarTrack – Tool Inventory</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{background:#f1f5f9;font-family:'Segoe UI',sans-serif;-webkit-tap-highlight-color:transparent;}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes slideIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    input,select,button,textarea{font-family:inherit;}
+    .card{background:#fff;border-radius:16px;border:1px solid #e2e8f0;overflow:hidden;}
+    .input-field{width:100%;padding:12px 14px;border-radius:10px;border:1.5px solid #e2e8f0;font-size:15px;outline:none;transition:border-color .2s;background:#fff;}
+    .input-field:focus{border-color:#0f172a;}
+    label{display:block;font-size:13px;font-weight:700;color:#334155;margin-bottom:6px;}
+    .action-btn{padding:14px;border:none;border-radius:12px;font-weight:800;cursor:pointer;font-size:14px;transition:opacity .15s;}
+    .action-btn:active{opacity:0.75;}
+    .nav-btn{padding:10px 6px;border:none;cursor:pointer;font-weight:600;font-size:10px;background:transparent;color:#94a3b8;display:flex;flex-direction:column;align-items:center;gap:3px;transition:color .2s;flex:1;text-transform:uppercase;letter-spacing:0.4px;}
+    .nav-btn .icon{font-size:22px;}
+    .nav-btn.active{color:#f59e0b;}
+    .spinner{width:20px;height:20px;border:2px solid #e2e8f0;border-top-color:#0f172a;border-radius:50%;animation:spin .7s linear infinite;display:inline-block;}
+    ::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px;}
+    @media print{#nav,#header,#main-content>*:not(#print-area){display:none!important;}#print-area{display:block!important;}}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+// When running locally: leave as empty string (uses same server)
+// When using a deployed backend: replace with your Railway URL e.g. "https://solartrack.railway.app"
+const API_BASE = 'https://solar-inventory.up.railway.app';
+
+const CATEGORIES  = ['Electrical','PPE','Power Tools','Hand Tools','Mounting','Other'];
+const TECHNICIANS = ['Tech A','Tech B','Tech C','Tech D','Tech E'];
+
+// ── API HELPER ────────────────────────────────────────────────────────────────
+async function api(path, options = {}) {
+  const token = localStorage.getItem('st_token');
+  const res = await fetch(`${API_BASE}/api${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {}),
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+// ── COMPONENTS ────────────────────────────────────────────────────────────────
+const STATUS_STYLES = {
+  Available:   {bg:'#d1fae5',color:'#065f46',dot:'#10b981'},
+  Issued:      {bg:'#fef3c7',color:'#78350f',dot:'#f59e0b'},
+  Damaged:     {bg:'#fee2e2',color:'#7f1d1d',dot:'#ef4444'},
+  Maintenance: {bg:'#ede9fe',color:'#4c1d95',dot:'#8b5cf6'},
+};
+
+function StatusBadge({status}) {
+  const s = STATUS_STYLES[status] || STATUS_STYLES.Available;
+  return (
+    <span style={{background:s.bg,color:s.color,padding:'3px 10px',borderRadius:20,fontSize:12,fontWeight:600,display:'inline-flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}}>
+      <span style={{width:6,height:6,borderRadius:'50%',background:s.dot,flexShrink:0,display:'inline-block'}}/>
+      {status}
+    </span>
+  );
+}
+
+function BarcodeVisual({id,name}) {
+  const bars = id.split('').map(c=>c.charCodeAt(0));
+  return (
+    <div style={{fontFamily:'monospace',textAlign:'center'}}>
+      <div style={{display:'flex',gap:1,justifyContent:'center',height:52,alignItems:'flex-end',marginBottom:6}}>
+        {Array.from({length:44}).map((_,i)=>{
+          const val=bars[i%bars.length]+i;
+          return <div key={i} style={{width:(val%3)+1,height:28+(val%22),background:'#0f172a',borderRadius:1}}/>;
+        })}
+      </div>
+      <div style={{fontSize:12,letterSpacing:4,color:'#334155',fontWeight:700}}>{id}</div>
+      <div style={{fontSize:11,color:'#64748b',marginTop:3}}>{name}</div>
+    </div>
+  );
+}
+
+function Spinner() { return <div className="spinner"/>; }
+
+// ── LOGIN SCREEN ──────────────────────────────────────────────────────────────
+function LoginScreen({onLogin}) {
+  const [form,setForm] = useState({username:'',password:''});
+  const [loading,setLoading] = useState(false);
+  const [error,setError] = useState('');
+
+  const submit = async () => {
+    if(!form.username||!form.password){setError('Please enter username and password.');return;}
+    setLoading(true); setError('');
+    try {
+      const data = await api('/auth/login',{method:'POST',body:form});
+      localStorage.setItem('st_token', data.token);
+      localStorage.setItem('st_user',  JSON.stringify(data.user));
+      onLogin(data.user);
+    } catch(err) {
+      setError(err.message);
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:20,background:'#0f172a'}}>
+      <div style={{width:'100%',maxWidth:360,animation:'fadeIn .4s'}}>
+        <div style={{textAlign:'center',marginBottom:36}}>
+          <div style={{width:64,height:64,background:'#f59e0b',borderRadius:18,display:'flex',alignItems:'center',justifyContent:'center',fontSize:34,margin:'0 auto 16px'}}>☀️</div>
+          <div style={{color:'#f8fafc',fontSize:26,fontWeight:900,letterSpacing:-0.5}}>SolarTrack</div>
+          <div style={{color:'#475569',fontSize:13,marginTop:4}}>Tool Inventory System</div>
+        </div>
+        <div className="card" style={{padding:28}}>
+          <div style={{marginBottom:16}}>
+            <label>Username</label>
+            <input className="input-field" value={form.username} onChange={e=>setForm(p=>({...p,username:e.target.value}))}
+              onKeyDown={e=>e.key==='Enter'&&submit()} placeholder="admin or manager" autoCapitalize="none"/>
+          </div>
+          <div style={{marginBottom:20}}>
+            <label>Password</label>
+            <input className="input-field" type="password" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))}
+              onKeyDown={e=>e.key==='Enter'&&submit()} placeholder="••••••••"/>
+          </div>
+          {error && <div style={{marginBottom:14,color:'#ef4444',fontSize:13,fontWeight:600}}>⚠ {error}</div>}
+          <button onClick={submit} disabled={loading} style={{width:'100%',padding:15,background:'#f59e0b',color:'#0f172a',border:'none',borderRadius:12,fontWeight:900,cursor:'pointer',fontSize:16,display:'flex',alignItems:'center',justifyContent:'center',gap:10}}>
+            {loading ? <><Spinner/> Logging in…</> : 'Log In →'}
+          </button>
+          <div style={{marginTop:16,fontSize:12,color:'#94a3b8',textAlign:'center'}}>
+            Default password for both accounts: <b style={{color:'#64748b'}}>admin123</b>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── DASHBOARD ─────────────────────────────────────────────────────────────────
+function Dashboard({user}) {
+  const [stats,setStats] = useState(null);
+  const [history,setHistory] = useState([]);
+  const [loading,setLoading] = useState(true);
+
+  useEffect(()=>{
+    Promise.all([
+      api('/history/stats'),
+      api('/history?limit=6')
+    ]).then(([s,h])=>{setStats(s);setHistory(h);}).finally(()=>setLoading(false));
+  },[]);
+
+  if(loading) return <div style={{padding:40,textAlign:'center'}}><Spinner/></div>;
+
+  const c = stats?.counts || {};
+  const cards = [
+    {label:'Total Tools', val:parseInt(c.total)||0,     bg:'#f8fafc',color:'#0f172a',icon:'🔧'},
+    {label:'Available',   val:parseInt(c.available)||0, bg:'#d1fae5',color:'#065f46',icon:'✅'},
+    {label:'Issued',      val:parseInt(c.issued)||0,    bg:'#fef3c7',color:'#78350f',icon:'📤'},
+    {label:'Damaged',     val:(parseInt(c.damaged)||0)+(parseInt(c.maintenance)||0), bg:'#fee2e2',color:'#7f1d1d',icon:'⚠️'},
+  ];
+  const actionIcons = {Issued:'📤',Return:'↩',Registered:'📦',Damaged:'⚠️',Maintenance:'🔨'};
+  const actionBgs   = {Issued:'#fef3c7',Return:'#d1fae5',Registered:'#ede9fe',Damaged:'#fee2e2',Maintenance:'#ede9fe'};
+
+  return (
+    <div style={{animation:'slideIn .3s'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
+        <h2 style={{fontSize:20,fontWeight:800,color:'#0f172a'}}>Overview</h2>
+        <span style={{fontSize:12,color:'#64748b'}}>Welcome, {user.full_name||user.username}</span>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:24}}>
+        {cards.map(c=>(
+          <div key={c.label} style={{background:c.bg,borderRadius:14,padding:18,border:`1px solid ${c.color}20`}}>
+            <div style={{fontSize:24}}>{c.icon}</div>
+            <div style={{fontSize:32,fontWeight:900,color:c.color,marginTop:6}}>{c.val}</div>
+            <div style={{fontSize:12,color:c.color,fontWeight:600,opacity:0.8,marginTop:2}}>{c.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {stats?.byCategory?.length > 0 && (
+        <>
+          <h3 style={{fontSize:14,fontWeight:700,color:'#0f172a',marginBottom:10}}>By Category</h3>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:24}}>
+            {stats.byCategory.map(r=>(
+              <div key={r.category} style={{background:'#fff',border:'1px solid #e2e8f0',borderRadius:10,padding:'7px 13px',fontSize:13,fontWeight:600,color:'#334155'}}>
+                {r.category} <span style={{color:'#f59e0b',fontWeight:800}}>{r.count}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <h3 style={{fontSize:14,fontWeight:700,color:'#0f172a',marginBottom:10}}>Recent Activity</h3>
+      <div className="card">
+        {history.length===0 && <div style={{padding:32,textAlign:'center',color:'#94a3b8',fontSize:14}}>No activity yet.</div>}
+        {history.map((h,i)=>(
+          <div key={h.id} style={{padding:'13px 16px',borderBottom:i<history.length-1?'1px solid #f1f5f9':'none',display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+            <div style={{display:'flex',gap:10,alignItems:'center',minWidth:0}}>
+              <div style={{width:34,height:34,background:actionBgs[h.action]||'#f1f5f9',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',fontSize:16,flexShrink:0}}>{actionIcons[h.action]||'🔧'}</div>
+              <div style={{minWidth:0}}>
+                <div style={{fontWeight:600,fontSize:13,color:'#0f172a',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{h.tool_name}</div>
+                <div style={{fontSize:11,color:'#64748b'}}>{h.tool_id} · {h.action} by {h.performed_by}</div>
+              </div>
+            </div>
+            <div style={{fontSize:11,color:'#94a3b8',whiteSpace:'nowrap',flexShrink:0}}>
+              {new Date(h.performed_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── SCAN TAB ──────────────────────────────────────────────────────────────────
+function ScanTab({showToast}) {
+  const [input,setInput] = useState('');
+  const [tool,setTool]   = useState(null);
+  const [err,setErr]     = useState('');
+  const [tech,setTech]   = useState(TECHNICIANS[0]);
+  const [loading,setLoading] = useState(false);
+  const [acting,setActing]   = useState(false);
+  const inputRef = useRef();
+
+  const doScan = async () => {
+    const code = input.trim().toUpperCase();
+    if(!code) return;
+    setLoading(true); setErr(''); setTool(null);
+    try {
+      const found = await api(`/tools/${code}`);
+      setTool(found);
+    } catch(e) {
+      setErr(`No tool found for barcode "${code}"`);
+    } finally { setLoading(false); }
+  };
+
+  const doAction = async (action) => {
+    setActing(true);
+    try {
+      const updated = await api(`/tools/${tool.id}`,{
+        method:'PATCH',
+        body:{ action, assignedTo: action==='Issue'?tech:undefined }
+      });
+      setTool(updated);
+      showToast(`${tool.name} → ${action==='Issue'?'Issued to '+tech:action}`);
+    } catch(e) {
+      showToast(e.message,'error');
+    } finally { setActing(false); }
+  };
+
+  return (
+    <div style={{animation:'slideIn .3s'}}>
+      <h2 style={{fontSize:20,fontWeight:800,color:'#0f172a',marginBottom:6}}>Scan Tool</h2>
+      <p style={{color:'#64748b',fontSize:13,marginBottom:18}}>Type or scan barcode ID then tap →</p>
+      <div className="card" style={{padding:20,marginBottom:16}}>
+        <div style={{display:'flex',gap:8}}>
+          <input ref={inputRef} className="input-field" value={input}
+            onChange={e=>setInput(e.target.value)}
+            onKeyDown={e=>e.key==='Enter'&&doScan()}
+            placeholder="e.g. INV-001"
+            style={{flex:1,fontFamily:'monospace',fontWeight:700,letterSpacing:2,fontSize:16}}
+            autoCapitalize="characters"/>
+          <button onClick={doScan} disabled={loading} style={{padding:'12px 18px',background:'#f59e0b',color:'#0f172a',border:'none',borderRadius:10,fontWeight:900,cursor:'pointer',fontSize:20,display:'flex',alignItems:'center',justifyContent:'center',minWidth:52}}>
+            {loading?<Spinner/>:'→'}
+          </button>
+        </div>
+        {err && <div style={{marginTop:10,color:'#ef4444',fontWeight:600,fontSize:13}}>⚠ {err}</div>}
+      </div>
+
+      {tool && (
+        <div className="card" style={{padding:22,border:'2px solid #0f172a',animation:'fadeIn .25s'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:16}}>
+            <div>
+              <div style={{fontSize:20,fontWeight:900,color:'#0f172a'}}>{tool.name}</div>
+              <div style={{fontSize:12,color:'#64748b',marginTop:4}}>{tool.id} · {tool.category} · {tool.location}</div>
+            </div>
+            <StatusBadge status={tool.status}/>
+          </div>
+          <div style={{background:'#f8fafc',borderRadius:12,padding:16,marginBottom:16}}>
+            <BarcodeVisual id={tool.id} name={tool.name}/>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:18,fontSize:13}}>
+            <div style={{color:'#64748b'}}>Qty: <b style={{color:'#0f172a'}}>{tool.quantity}</b></div>
+            <div style={{color:'#64748b'}}>Condition: <b style={{color:'#0f172a'}}>{tool.condition}</b></div>
+            <div style={{color:'#64748b'}}>Assigned: <b style={{color:'#0f172a'}}>{tool.assigned_to||'—'}</b></div>
+          </div>
+
+          {tool.status==='Available' && (
+            <div>
+              <label>Issue to Technician</label>
+              <select value={tech} onChange={e=>setTech(e.target.value)} className="input-field" style={{marginBottom:12}}>
+                {TECHNICIANS.map(t=><option key={t}>{t}</option>)}
+              </select>
+              <button className="action-btn" onClick={()=>doAction('Issue')} disabled={acting}
+                style={{width:'100%',background:'#f59e0b',color:'#0f172a',display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+                {acting?<Spinner/>:'📤'} Issue to {tech}
+              </button>
+            </div>
+          )}
+          {tool.status==='Issued' && (
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              <button className="action-btn" onClick={()=>doAction('Return')} disabled={acting} style={{background:'#10b981',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+                {acting?<Spinner/>:'↩'} Return Tool
+              </button>
+              <div style={{display:'flex',gap:8}}>
+                <button className="action-btn" onClick={()=>doAction('Damaged')} disabled={acting} style={{flex:1,background:'#ef4444',color:'#fff'}}>⚠ Damaged</button>
+                <button className="action-btn" onClick={()=>doAction('Maintenance')} disabled={acting} style={{flex:1,background:'#8b5cf6',color:'#fff'}}>🔨 Maintenance</button>
+              </div>
+            </div>
+          )}
+          {(tool.status==='Damaged'||tool.status==='Maintenance') && (
+            <button className="action-btn" onClick={()=>doAction('Return')} disabled={acting}
+              style={{width:'100%',background:'#10b981',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+              {acting?<Spinner/>:'✅'} Mark as Available
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── ALL TOOLS ─────────────────────────────────────────────────────────────────
+function AllTools({onLabel}) {
+  const [tools,setTools]   = useState([]);
+  const [loading,setLoading] = useState(true);
+  const [filter,setFilter] = useState('All');
+
+  useEffect(()=>{
+    api('/tools').then(setTools).finally(()=>setLoading(false));
+  },[]);
+
+  const filtered = filter==='All' ? tools : tools.filter(t=>t.status===filter);
+
+  if(loading) return <div style={{padding:40,textAlign:'center'}}><Spinner/></div>;
+
+  return (
+    <div style={{animation:'slideIn .3s'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+        <h2 style={{fontSize:20,fontWeight:800,color:'#0f172a'}}>Tools ({filtered.length})</h2>
+      </div>
+      <div style={{display:'flex',gap:6,marginBottom:16,overflowX:'auto',paddingBottom:4}}>
+        {['All','Available','Issued','Damaged','Maintenance'].map(f=>(
+          <button key={f} onClick={()=>setFilter(f)} style={{padding:'6px 14px',borderRadius:20,border:'none',cursor:'pointer',fontWeight:600,fontSize:12,whiteSpace:'nowrap',
+            background:filter===f?'#0f172a':'#fff',color:filter===f?'#f8fafc':'#64748b',border:`1px solid ${filter===f?'#0f172a':'#e2e8f0'}`}}>
+            {f}
+          </button>
+        ))}
+      </div>
+      {filtered.length===0 && <div style={{padding:40,textAlign:'center',color:'#94a3b8'}}>No tools found.</div>}
+      <div style={{display:'flex',flexDirection:'column',gap:10}}>
+        {filtered.map(t=>(
+          <div key={t.id} className="card" style={{padding:16}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+              <div>
+                <div style={{fontWeight:700,fontSize:15,color:'#0f172a'}}>{t.name}</div>
+                <div style={{fontFamily:'monospace',fontSize:12,color:'#94a3b8',marginTop:2}}>{t.id}</div>
+              </div>
+              <StatusBadge status={t.status}/>
+            </div>
+            <div style={{display:'flex',gap:12,fontSize:12,color:'#64748b',marginBottom:10,flexWrap:'wrap'}}>
+              <span>📂 {t.category}</span>
+              <span>📍 {t.location}</span>
+              <span>🔢 Qty: {t.quantity}</span>
+              {t.assigned_to&&<span>👤 {t.assigned_to}</span>}
+            </div>
+            <button onClick={()=>onLabel(t)} style={{padding:'7px 14px',background:'#f1f5f9',border:'none',borderRadius:8,cursor:'pointer',fontSize:12,fontWeight:600,color:'#334155'}}>🏷 Print Label</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── ADD TOOL ──────────────────────────────────────────────────────────────────
+function AddTool({showToast,setPrintTool}) {
+  const blank = {name:'',category:CATEGORIES[0],quantity:1,condition:'Good',location:''};
+  const [form,setForm]     = useState(blank);
+  const [loading,setLoading] = useState(false);
+  const [preview,setPreview] = useState('INV-???');
+
+  useEffect(()=>{
+    api('/tools').then(tools=>{
+      if(!tools.length){setPreview('INV-001');return;}
+      const nums = tools.map(t=>parseInt(t.id.replace('INV-',''))).filter(Boolean);
+      setPreview(`INV-${String(Math.max(...nums)+1).padStart(3,'0')}`);
+    }).catch(()=>{});
+  },[]);
+
+  const submit = async () => {
+    if(!form.name.trim()||!form.location.trim()){showToast('Please fill all fields','error');return;}
+    setLoading(true);
+    try {
+      const tool = await api('/tools',{method:'POST',body:form});
+      showToast(`${tool.name} registered as ${tool.id}`);
+      setPrintTool(tool);
+      setForm(blank);
+      const nums2 = [parseInt(tool.id.replace('INV-',''))];
+      setPreview(`INV-${String(nums2[0]+1).padStart(3,'0')}`);
+    } catch(e) {
+      showToast(e.message,'error');
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div style={{animation:'slideIn .3s'}}>
+      <h2 style={{fontSize:20,fontWeight:800,color:'#0f172a',marginBottom:18}}>Register New Tool</h2>
+      <div className="card" style={{padding:24}}>
+        <div style={{marginBottom:16}}>
+          <label>Tool Name</label>
+          <input className="input-field" value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Solar Panel Clamp"/>
+        </div>
+        <div style={{marginBottom:16}}>
+          <label>Location / Store</label>
+          <input className="input-field" value={form.location} onChange={e=>setForm(p=>({...p,location:e.target.value}))} placeholder="e.g. Store A"/>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}}>
+          <div>
+            <label>Category</label>
+            <select className="input-field" value={form.category} onChange={e=>setForm(p=>({...p,category:e.target.value}))}>
+              {CATEGORIES.map(c=><option key={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Condition</label>
+            <select className="input-field" value={form.condition} onChange={e=>setForm(p=>({...p,condition:e.target.value}))}>
+              {['New','Good','Fair','Poor'].map(c=><option key={c}>{c}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{marginBottom:18}}>
+          <label>Quantity</label>
+          <input className="input-field" type="number" min="1" value={form.quantity} onChange={e=>setForm(p=>({...p,quantity:parseInt(e.target.value)||1}))}/>
+        </div>
+        <div style={{background:'#f8fafc',borderRadius:12,padding:14,marginBottom:18,textAlign:'center',fontSize:13,color:'#64748b'}}>
+          Will be assigned: <span style={{fontFamily:'monospace',fontWeight:900,color:'#0f172a',fontSize:18}}>{preview}</span>
+        </div>
+        <button onClick={submit} disabled={loading} style={{width:'100%',padding:16,background:'#0f172a',color:'#f8fafc',border:'none',borderRadius:12,fontWeight:800,cursor:'pointer',fontSize:16,display:'flex',alignItems:'center',justifyContent:'center',gap:10}}>
+          {loading?<><Spinner/> Registering…</>:'➕ Register & Generate Barcode'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── HISTORY ───────────────────────────────────────────────────────────────────
+function History() {
+  const [history,setHistory] = useState([]);
+  const [loading,setLoading] = useState(true);
+  const icons = {Issued:'📤',Return:'↩',Registered:'📦',Damaged:'⚠️',Maintenance:'🔨'};
+  const bgs   = {Issued:'#fef3c7',Return:'#d1fae5',Registered:'#ede9fe',Damaged:'#fee2e2',Maintenance:'#ede9fe'};
+
+  useEffect(()=>{
+    api('/history?limit=50').then(setHistory).finally(()=>setLoading(false));
+  },[]);
+
+  if(loading) return <div style={{padding:40,textAlign:'center'}}><Spinner/></div>;
+
+  return (
+    <div style={{animation:'slideIn .3s'}}>
+      <h2 style={{fontSize:20,fontWeight:800,color:'#0f172a',marginBottom:18}}>Transaction History ({history.length})</h2>
+      <div className="card">
+        {history.length===0 && <div style={{padding:40,textAlign:'center',color:'#94a3b8'}}>No transactions yet.</div>}
+        {history.map((h,i)=>(
+          <div key={h.id} style={{padding:'14px 16px',borderBottom:i<history.length-1?'1px solid #f1f5f9':'none',display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+            <div style={{display:'flex',gap:10,alignItems:'center',minWidth:0}}>
+              <div style={{width:38,height:38,borderRadius:10,background:bgs[h.action]||'#f1f5f9',display:'flex',alignItems:'center',justifyContent:'center',fontSize:17,flexShrink:0}}>{icons[h.action]||'🔧'}</div>
+              <div style={{minWidth:0}}>
+                <div style={{fontWeight:700,fontSize:14,color:'#0f172a'}}>{h.tool_name} <span style={{fontFamily:'monospace',fontWeight:400,fontSize:12,color:'#94a3b8'}}>({h.tool_id})</span></div>
+                <div style={{fontSize:12,color:'#64748b'}}><b>{h.action}</b> by {h.performed_by}</div>
+              </div>
+            </div>
+            <div style={{fontSize:11,color:'#94a3b8',whiteSpace:'nowrap',flexShrink:0,textAlign:'right'}}>
+              <div>{new Date(h.performed_at).toLocaleDateString()}</div>
+              <div>{new Date(h.performed_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── MAIN APP ──────────────────────────────────────────────────────────────────
+function App() {
+  const [user,setUser]           = useState(()=>{
+    try{ return JSON.parse(localStorage.getItem('st_user')); } catch{ return null; }
+  });
+  const [tab,setTab]             = useState('dashboard');
+  const [printTool,setPrintTool] = useState(null);
+  const [toast,setToast]         = useState(null);
+
+  const showToast = (msg,type='success') => {
+    setToast({msg,type});
+    setTimeout(()=>setToast(null),3200);
+  };
+
+  const logout = () => {
+    localStorage.removeItem('st_token');
+    localStorage.removeItem('st_user');
+    setUser(null);
+  };
+
+  if(!user) return <LoginScreen onLogin={setUser}/>;
+
+  const isAdmin = user.role==='admin';
+
+  const TABS = [
+    {id:'dashboard', icon:'📊', label:'Home',    show:true},
+    {id:'scan',      icon:'📷', label:'Scan',    show:true},
+    {id:'tools',     icon:'🔧', label:'Tools',   show:true},
+    {id:'add',       icon:'➕', label:'Add',     show:isAdmin},
+    {id:'history',   icon:'📋', label:'History', show:true},
+  ].filter(t=>t.show);
+
+  // if current tab is not available for this role, reset to dashboard
+  const currentTab = TABS.find(t=>t.id===tab) ? tab : 'dashboard';
+
+  return (
+    <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',maxWidth:640,margin:'0 auto'}}>
+
+      {/* Header */}
+      <div id="header" style={{background:'#0f172a',padding:'0 20px',display:'flex',alignItems:'center',justifyContent:'space-between',height:58,flexShrink:0}}>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <div style={{width:32,height:32,background:'#f59e0b',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18}}>☀️</div>
+          <div>
+            <div style={{color:'#f8fafc',fontWeight:800,fontSize:16,letterSpacing:-0.5}}>SolarTrack</div>
+            <div style={{color:'#475569',fontSize:10,textTransform:'uppercase',letterSpacing:0.5}}>{user.role} · {user.full_name||user.username}</div>
+          </div>
+        </div>
+        <button onClick={logout} style={{padding:'6px 12px',background:'transparent',border:'1px solid #334155',borderRadius:8,color:'#64748b',cursor:'pointer',fontSize:12,fontWeight:600}}>
+          Log out
+        </button>
+      </div>
+
+      {/* Content */}
+      <div style={{flex:1,overflowY:'auto',padding:'20px 16px 90px'}}>
+        {currentTab==='dashboard' && <Dashboard user={user}/>}
+        {currentTab==='scan'      && <ScanTab showToast={showToast}/>}
+        {currentTab==='tools'     && <AllTools onLabel={setPrintTool}/>}
+        {currentTab==='add'       && isAdmin && <AddTool showToast={showToast} setPrintTool={setPrintTool}/>}
+        {currentTab==='history'   && <History/>}
+      </div>
+
+      {/* Bottom Nav */}
+      <div id="nav" style={{position:'fixed',bottom:0,left:'50%',transform:'translateX(-50%)',width:'100%',maxWidth:640,background:'#fff',borderTop:'1px solid #e2e8f0',display:'flex',zIndex:50,paddingBottom:'env(safe-area-inset-bottom)'}}>
+        {TABS.map(t=>(
+          <button key={t.id} className={`nav-btn${currentTab===t.id?' active':''}`} onClick={()=>setTab(t.id)}>
+            <span className="icon">{t.icon}</span>
+            <span>{t.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Print Label Modal */}
+      {printTool && (
+        <div style={{position:'fixed',inset:0,background:'#0009',display:'flex',alignItems:'center',justifyContent:'center',zIndex:100,padding:20}} onClick={()=>setPrintTool(null)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:20,padding:28,width:'100%',maxWidth:340,boxShadow:'0 20px 60px #0004',animation:'fadeIn .25s'}}>
+            <h3 style={{fontSize:17,fontWeight:800,color:'#0f172a',marginBottom:20,textAlign:'center'}}>🏷 Print Label</h3>
+            <div id="print-area" style={{border:'2px dashed #e2e8f0',borderRadius:14,padding:24,marginBottom:20}}>
+              <BarcodeVisual id={printTool.id} name={printTool.name}/>
+              <div style={{textAlign:'center',marginTop:10,fontSize:12,color:'#64748b'}}>{printTool.category} · {printTool.location}</div>
+            </div>
+            <button onClick={()=>window.print()} style={{width:'100%',padding:14,background:'#0f172a',color:'#f8fafc',border:'none',borderRadius:12,fontWeight:800,cursor:'pointer',fontSize:15,marginBottom:10}}>🖨 Print Label</button>
+            <button onClick={()=>setPrintTool(null)} style={{width:'100%',padding:12,background:'#f1f5f9',color:'#334155',border:'none',borderRadius:12,fontWeight:600,cursor:'pointer',fontSize:14}}>Close</button>
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div style={{position:'fixed',bottom:76,left:'50%',transform:'translateX(-50%)',background:toast.type==='error'?'#ef4444':'#0f172a',color:'#fff',padding:'12px 20px',borderRadius:14,fontWeight:600,fontSize:13,boxShadow:'0 8px 30px #0004',zIndex:200,animation:'fadeIn .3s',whiteSpace:'nowrap',maxWidth:'90vw',overflow:'hidden',textOverflow:'ellipsis'}}>
+          {toast.type==='error'?'⚠ ':'✅ '}{toast.msg}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
