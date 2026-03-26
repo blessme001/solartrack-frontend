@@ -24,6 +24,38 @@
     .nav-btn .icon{font-size:22px;}
     .nav-btn.active{color:#f59e0b;}
     .spinner{width:20px;height:20px;border:2px solid #e2e8f0;border-top-color:#0f172a;border-radius:50%;animation:spin .7s linear infinite;display:inline-block;}
+    .brand-logo-login{
+      width:120px;
+      height:120px;
+      object-fit:contain;
+      display:block;
+      margin:0 auto 14px;
+    }
+    .brand-logo-header{
+      width:36px;
+      height:36px;
+      object-fit:contain;
+      border-radius:8px;
+      display:block;
+      background:#fff;
+      padding:2px;
+      flex-shrink:0;
+    }
+    .brand-title{
+      color:#f8fafc;
+      font-weight:800;
+      font-size:15px;
+      letter-spacing:-0.3px;
+      line-height:1.1;
+    }
+    .brand-subtitle{
+      color:#64748b;
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:0.5px;
+      line-height:1.2;
+      margin-top:2px;
+    }
     ::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px;}
     @media print{#nav,#header,#main-content>*:not(#print-area){display:none!important;}#print-area{display:block!important;}}
   </style>
@@ -34,8 +66,6 @@
 const { useState, useEffect, useRef, useCallback } = React;
 
 // ── CONFIG ────────────────────────────────────────────────────────────────────
-// When running locally: leave as empty string (uses same server)
-// When using a deployed backend: replace with your Railway URL e.g. "https://solartrack.railway.app"
 const API_BASE = 'https://solar-inventory.up.railway.app';
 
 const CATEGORIES  = ['Electrical','PPE','Power Tools','Hand Tools','Mounting','Other'];
@@ -117,7 +147,11 @@ function LoginScreen({onLogin}) {
     <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:20,background:'#0f172a'}}>
       <div style={{width:'100%',maxWidth:360,animation:'fadeIn .4s'}}>
         <div style={{textAlign:'center',marginBottom:36}}>
-          <div style={{width:64,height:64,background:'#f59e0b',borderRadius:18,display:'flex',alignItems:'center',justifyContent:'center',fontSize:34,margin:'0 auto 16px'}}>☀️</div>
+          <img
+            src="chybon-logo.png"
+            alt="Chybonsolar Energy Limited Logo"
+            className="brand-logo-login"
+          />
           <div style={{color:'#f8fafc',fontSize:26,fontWeight:900,letterSpacing:-0.5}}>SolarTrack</div>
           <div style={{color:'#475569',fontSize:13,marginTop:4}}>Tool Inventory System</div>
         </div>
@@ -522,19 +556,21 @@ function App() {
     {id:'history',   icon:'📋', label:'History', show:true},
   ].filter(t=>t.show);
 
-  // if current tab is not available for this role, reset to dashboard
   const currentTab = TABS.find(t=>t.id===tab) ? tab : 'dashboard';
 
   return (
     <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',maxWidth:640,margin:'0 auto'}}>
 
-      {/* Header */}
       <div id="header" style={{background:'#0f172a',padding:'0 20px',display:'flex',alignItems:'center',justifyContent:'space-between',height:58,flexShrink:0}}>
-        <div style={{display:'flex',alignItems:'center',gap:10}}>
-          <div style={{width:32,height:32,background:'#f59e0b',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18}}>☀️</div>
-          <div>
-            <div style={{color:'#f8fafc',fontWeight:800,fontSize:16,letterSpacing:-0.5}}>SolarTrack</div>
-            <div style={{color:'#475569',fontSize:10,textTransform:'uppercase',letterSpacing:0.5}}>{user.role} · {user.full_name||user.username}</div>
+        <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0}}>
+          <img
+            src="chybon-logo.png"
+            alt="Chybonsolar Energy Limited Logo"
+            className="brand-logo-header"
+          />
+          <div style={{minWidth:0}}>
+            <div className="brand-title">Chybonsolarenergies</div>
+            <div className="brand-subtitle">Inventory Tracker</div>
           </div>
         </div>
         <button onClick={logout} style={{padding:'6px 12px',background:'transparent',border:'1px solid #334155',borderRadius:8,color:'#64748b',cursor:'pointer',fontSize:12,fontWeight:600}}>
@@ -542,8 +578,7 @@ function App() {
         </button>
       </div>
 
-      {/* Content */}
-      <div style={{flex:1,overflowY:'auto',padding:'20px 16px 90px'}}>
+      <div id="main-content" style={{flex:1,overflowY:'auto',padding:'20px 16px 90px'}}>
         {currentTab==='dashboard' && <Dashboard user={user}/>}
         {currentTab==='scan'      && <ScanTab showToast={showToast}/>}
         {currentTab==='tools'     && <AllTools onLabel={setPrintTool}/>}
@@ -551,7 +586,6 @@ function App() {
         {currentTab==='history'   && <History/>}
       </div>
 
-      {/* Bottom Nav */}
       <div id="nav" style={{position:'fixed',bottom:0,left:'50%',transform:'translateX(-50%)',width:'100%',maxWidth:640,background:'#fff',borderTop:'1px solid #e2e8f0',display:'flex',zIndex:50,paddingBottom:'env(safe-area-inset-bottom)'}}>
         {TABS.map(t=>(
           <button key={t.id} className={`nav-btn${currentTab===t.id?' active':''}`} onClick={()=>setTab(t.id)}>
@@ -561,7 +595,6 @@ function App() {
         ))}
       </div>
 
-      {/* Print Label Modal */}
       {printTool && (
         <div style={{position:'fixed',inset:0,background:'#0009',display:'flex',alignItems:'center',justifyContent:'center',zIndex:100,padding:20}} onClick={()=>setPrintTool(null)}>
           <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:20,padding:28,width:'100%',maxWidth:340,boxShadow:'0 20px 60px #0004',animation:'fadeIn .25s'}}>
@@ -576,7 +609,6 @@ function App() {
         </div>
       )}
 
-      {/* Toast */}
       {toast && (
         <div style={{position:'fixed',bottom:76,left:'50%',transform:'translateX(-50%)',background:toast.type==='error'?'#ef4444':'#0f172a',color:'#fff',padding:'12px 20px',borderRadius:14,fontWeight:600,fontSize:13,boxShadow:'0 8px 30px #0004',zIndex:200,animation:'fadeIn .3s',whiteSpace:'nowrap',maxWidth:'90vw',overflow:'hidden',textOverflow:'ellipsis'}}>
           {toast.type==='error'?'⚠ ':'✅ '}{toast.msg}
