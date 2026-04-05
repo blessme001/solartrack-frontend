@@ -41,6 +41,7 @@ const TECHNICIANS = ['Tech A','Tech B','Tech C','Tech D','Tech E'];
 
 async function api(path, options = {}) {
   const token = localStorage.getItem('st_token');
+
   const res = await fetch(`${API_BASE}/api${path}`, {
     ...options,
     headers: {
@@ -50,8 +51,22 @@ async function api(path, options = {}) {
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
+
+  // 🔥 HANDLE EXPIRED TOKEN HERE
+  if (res.status === 401 || res.status === 403) {
+    localStorage.removeItem('st_token');
+    localStorage.removeItem('st_user');
+
+    alert('Session expired. Please log in again.');
+
+    window.location.reload(); // or switch to login screen if using state
+    return;
+  }
+
   const data = await res.json();
+
   if (!res.ok) throw new Error(data.error || 'Request failed');
+
   return data;
 }
 
